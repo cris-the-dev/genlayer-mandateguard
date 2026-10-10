@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MandateGuard</title><meta name="description" content="Consensus supervision for an AI agent's spending mandate: receipts, reviews and a continue, warn, constrain, revoke or escalate decision."><meta name="theme-color" content="#FAFAF7">
+<link rel="stylesheet" href="app.css">
+</head><body>
+<div class="bar"><div class="w"><span class="who">cristhedev <span style="color:var(--line)">/</span> genlayer builds</span><nav id="sites"></nav></div></div>
+<div class="head"><div class="w"><div><h1>MandateGuard</h1><p>Consensus supervision for an AI agent's spending mandate: receipts, reviews and a continue, warn, constrain, revoke or escalate decision.</p></div><button id="connect" class="ghost" type="button">Connect wallet</button></div></div>
+<div class="meta"><div class="w"><span>contract <a href="https://explorer-bradbury.genlayer.com/address/0x023e18d8b4feD3b62495Cb19c384ecD1E0113BeD">0x023e…3BeD ↗</a></span><span>network <b>testnet bradbury</b></span><span><a href="https://github.com/cris-the-dev/genlayer-mandateguard">source ↗</a></span><span><a href="docs.html">docs →</a></span></div></div>
+<main class="w">
+  <p id="status" class="status" hidden></p>
+  <div class="grid">
+    <div>
+      <section>
+        <h2>Mandates</h2>
+        <div class="tbl"><table>
+          <thead><tr><th>#</th><th>Objective</th><th class="r">Budget left</th><th class="r">Spent</th><th>Status</th></tr></thead>
+          <tbody id="mandates"><tr><td colspan="5" class="empty">Reading the contract…</td></tr></tbody>
+        </table></div>
+      </section>
+      <section id="detail" hidden></section>
+    </div>
+
+    <aside>
+      <section>
+        <h2>What a review can decide</h2>
+        <dl class="kv">
+          <div><dt>continue</dt><dd>full authority</dd></div>
+          <div><dt>warn</dt><dd>2 in a row = constrain</dd></div>
+          <div><dt>constrain</dt><dd>half cap, evidence required</dd></div>
+          <div><dt>revoke</dt><dd>frozen, one appeal, refund</dd></div>
+          <div><dt>escalate</dt><dd>delegator decides</dd></div>
+          <div><dt>Validators agree if</dt><dd>same class, criteria ±1</dd></div>
+        </dl>
+      </section>
+      <section>
+        <details>
+          <summary>Grant a mandate</summary>
+          <form id="grant">
+            <label>Agent address<input name="agent" pattern="0x[0-9a-fA-F]{40}" placeholder="0x…" required></label>
+            <label>Objective<textarea name="objective" minlength="20" maxlength="1000" required></textarea></label>
+            <label>Rubric, one criterion per line (up to 8)<textarea name="rubric" required></textarea></label>
+            <div class="row">
+              <label>Budget (GEN)<input name="budget" type="number" step="0.001" min="0.001" value="0.01" required></label>
+              <label>Max per spend (GEN)<input name="cap" type="number" step="0.0001" min="0.0001" value="0.004" required></label>
+            </div>
+            <div class="row">
+              <label>Review every N spends<input name="every" type="number" min="1" max="10" value="2" required></label>
+              <label>Duration (hours)<input name="hours" type="number" min="1" max="8760" value="168" required></label>
+            </div>
+            <label>Permission reference (optional, e.g. an ERC-7710 id)<input name="ref" maxlength="100"></label>
+            <button type="submit">Grant mandate</button>
+          </form>
+        </details>
+      </section>
+    </aside>
+  </div>
+</main>
+
+<div class="steps"><ol>
+  <li><small>01</small><b>Grant</b><p>The delegator escrows a budget and gives an agent an objective, a rubric, a per-spend cap, a review cadence and an expiry.</p></li>
+  <li><small>02</small><b>Spend</b><p>The agent pays through the contract. Each payment is a receipt with a purpose and an evidence link. Hard limits need no LLM.</p></li>
+  <li><small>03</small><b>Review</b><p>Every N spends, spending stops until anyone asks for a review. Validators read the receipts and evidence pages and decide by consensus.</p></li>
+</ol></div>
+
+<script type="module">
+import { contract, wireWallet, send, status, gen, toWei, esc, short, $, EXPLORER } from "./gl.js";
+const guard = contract("0x023e18d8b4feD3b62495Cb19c384ecD1E0113BeD");
+let me = null, items = [];
+const LIVE = ["ACTIVE", "WARNED", "CONSTRAINED"];
+const tagFor = (s) => ({ ACTIVE: "ok", WARNED: "on", CONSTRAINED: "on", REVOKED: "bad", ESCALATED: "bad" })[s] ?? "";
+const when = (ts) => ts ? new Date(ts * 1000).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "–";
+const addr = (a) => `<a class="mono" href="${EXPLORER}/address/${esc(a)}">${short(a)}</a>${me && a.toLowerCase() === me.toLowerCase() ? " (you)" : ""}`;
+const link = (u) => u ? `<a class="mono" href="${esc(u)}">${esc(u.replace(/^https:\/\//, "").slice(0, 48))}</a>` : `<span class="mut">none</span>`;
+
+async function load(openId) {
+  try {
+    const n = await guard.read("get_mandate_count");
+    items = await Promise.all([...Array(n).keys()].reverse().map((i) => guard.read("get_mandate", [i])));
+    $("#mandates").innerHTML = items.length ? items.map((m) => `<tr style="cursor:pointer" data-id="${m.id}">
+      <td class="num mut">${m.id}</td><td><a href="#mandate-${m.id}">${esc(m.objective.slice(0, 70))}${m.objective.length > 70 ? "…" : ""}</a></td>
+      <td class="r num">${gen(m.budget)} GEN</td><td class="r num">${gen(m.spent)} GEN</td>
+      <td><span class="tag ${tagFor(m.status)}">${esc(m.status)}</span></td></tr>`).join("")
+      : `<tr><td colspan="5" class="empty">No mandates yet.</td></tr>`;
+    const h = location.hash.match(/^#mandate-(\d+)$/), id = openId ?? (h ? Number(h[1]) : null);
+    if (items.length) show(Number.isInteger(id) && items.some((m) => m.id === id) ? id : items.find((m) => m.review_count)?.id ?? items[0].id);
+  } catch (e) {
+    $("#mandates").innerHTML = `<tr><td colspan="5" class="empty">Could not read the contract: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+function actions(m) {
+  if (!me) return `<p class="hint" style="margin-top:16px">Connect the delegator or agent wallet to act. Anyone can trigger a due review.</p>`;
+  const isD = m.delegator.toLowerCase() === me.toLowerCase(), isA = m.agent.toLowerCase() === me.toLowerCase();
+  const b = (fn, label, ghost = true, disabled = "", arg = "") => `<button class="${ghost ? "ghost" : ""}" data-act="${fn}"${arg !== "" ? ` data-arg="${arg}"` : ""}${disabled ? ` disabled title="${esc(disabled)}"` : ""}>${label}</button>`;
+  const now = Date.now() / 1000, expired = now > m.expires_at, live = LIVE.includes(m.status), out = [];
+  if (isA && live && !expired)
+    out.push(m.review_due ? `<p class="hint">A review is due before the next spend.</p>`
+      : `<form data-form="spend"><div class="row"><label>Pay to<input name="to" pattern="0x[0-9a-fA-F]{40}" required></label>
+        <label>Amount (GEN, cap ${gen(m.effective_max_per_tx, 6)})<input name="amount" type="number" step="any" min="0" required></label></div>
+        <label>Purpose<input name="purpose" maxlength="280" required></label>
+        <label>Evidence URL${m.status === "CONSTRAINED" ? " (required while constrained)" : ""}<input name="evidence" type="url" pattern="https://.*"${m.status === "CONSTRAINED" ? " required" : ""}></label>
+        <div><button>Spend</button></div></form>`);
+  if (live && m.spends_since_review > 0) out.push(b("request_review", `Ask validators to review ${m.spends_since_review} spend${m.spends_since_review > 1 ? "s" : ""}`, !m.review_due));
+  if (isA && m.status === "REVOKED" && !m.appealed)
+    out.push(`<form data-form="appeal_revocation"><label>Appeal statement (once, within 2 days of the revoke)<textarea name="statement" minlength="20" maxlength="1000" required></textarea></label><div><button class="ghost">Appeal revocation</button></div></form>`);
+  if (isD && m.status === "ESCALATED") out.push(`<div class="row">${b("resolve_escalation", "Restore authority", false, "", "1")}${b("resolve_escalation", "Close and refund", true, "", "0")}</div>`);
+  if (isD && !["REVOKED", "CLOSED"].includes(m.status))
+    out.push(`<form data-form="top_up" class="row" style="align-items:end"><label>Top up (GEN)<input name="amount" type="number" step="any" min="0" required></label><div><button class="ghost">Top up</button></div></form>`);
+  if (isD && m.status !== "CLOSED") {
+    out.push(b("withdraw_remaining", "Withdraw remaining budget", true, expired || m.status === "REVOKED" ? "" : `Available after ${when(m.expires_at)}, or after a revoke`));
+    out.push(b("emergency_revoke", "Emergency revoke and refund"));
+  }
+  if (!isD && !isA && !out.length) return `<p class="hint" style="margin-top:16px">You are not a party to this mandate.</p>`;
+  return out.length ? `<div style="display:grid;gap:12px;margin-top:20px">${out.join("")}</div>` : "";
+}
+
+async function show(id) {
+  const m = items.find((x) => x.id === id);
+  if (!m) return;
+  const [receipts, reviews] = await Promise.all([guard.read("get_receipts", [id]), guard.read("get_reviews", [id])]);
+  const el = $("#detail");
+  el.hidden = false;
+  el.innerHTML = `<h2>Mandate #${m.id}</h2>
+    <p style="margin:4px 0 12px">${esc(m.objective)}</p>
+    <dl class="kv">
+      <div><dt>Delegator</dt><dd>${addr(m.delegator)}</dd></div><div><dt>Agent</dt><dd>${addr(m.agent)}</dd></div>
+      <div><dt>Status</dt><dd>${esc(m.status)}${m.consecutive_warnings ? ` · ${m.consecutive_warnings} warning${m.consecutive_warnings > 1 ? "s" : ""} in a row` : ""}</dd></div>
+      <div><dt>Budget left</dt><dd>${gen(m.budget)} GEN</dd></div><div><dt>Cap per spend</dt><dd>${gen(m.effective_max_per_tx, 6)} GEN</dd></div>
+      <div><dt>Review</dt><dd>every ${m.review_every} spends · ${m.spends_since_review} since last</dd></div>
+      <div><dt>Expires</dt><dd>${when(m.expires_at)}</dd></div>
+      ${m.permission_ref ? `<div><dt>Permission ref</dt><dd class="mono">${esc(m.permission_ref)}</dd></div>` : ""}
+    </dl>
+    <h2 style="margin-top:24px">Rubric</h2><ol style="padding-left:18px;margin:0">${m.rubric.map((c) => `<li>${esc(c)}</li>`).join("")}</ol>
+    <h2 style="margin-top:24px">Receipts</h2>
+    ${receipts.length ? `<div class="tbl"><table><thead><tr><th>#</th><th>Purpose</th><th>To</th><th class="r">Amount</th><th>Evidence</th></tr></thead><tbody>
+      ${receipts.map((r, k) => `<tr><td class="num mut">${k}</td><td>${esc(r.purpose)}</td><td>${addr(r.to)}</td><td class="r num">${gen(r.amount, 6)}</td><td>${link(r.evidence_url)}</td></tr>`).join("")}
+    </tbody></table></div>` : `<p class="hint">No spends yet.</p>`}
+    ${reviews.map((r, k) => `<h2 style="margin-top:24px">Review ${k + 1}${r.appeal ? " (appeal)" : ""} · decided by validator consensus</h2>
+      <dl class="kv"><div><dt>Decision</dt><dd>${esc(r.decision)}</dd></div><div><dt>Rubric criteria met</dt><dd>${r.criteria_met} of ${r.criteria_total}</dd></div>
+      <div><dt>Spends reviewed</dt><dd>${r.reviewed_receipts}</dd></div><div><dt>At</dt><dd>${when(r.at)}</dd></div></dl>
+      ${r.reasoning ? `<blockquote style="margin:12px 0 0;padding-left:12px;border-left:2px solid var(--fg)">${esc(r.reasoning)}</blockquote>` : ""}
+      ${r.violations.length ? `<ul style="padding-left:18px;margin:8px 0 0">${r.violations.map((v) => `<li>${esc(typeof v === "string" ? v : JSON.stringify(v))}</li>`).join("")}</ul>` : ""}`).join("")}
+    ${actions(m)}`;
+  el.dataset.id = m.id;
+}
+
+$("#mandates").addEventListener("click", (e) => { const tr = e.target.closest("tr[data-id]"); if (tr) { e.preventDefault(); history.replaceState(null, "", `#mandate-${tr.dataset.id}`); show(Number(tr.dataset.id)); $("#detail").scrollIntoView({ behavior: "smooth" }); } });
+$("#detail").addEventListener("click", async (e) => {
+  const fn = e.target.dataset?.act; if (!fn) return;
+  const id = Number($("#detail").dataset.id), args = fn === "resolve_escalation" ? [id, e.target.dataset.arg === "1"] : [id];
+  if (fn === "emergency_revoke" && !confirm("Close this mandate now and refund the remaining budget to you?")) return;
+  if (await send(guard, fn.replaceAll("_", " "), fn, args)) load(id);
+});
+$("#detail").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target, fn = f.dataset.form, id = Number($("#detail").dataset.id);
+  let args = [id], value = 0n;
+  if (fn === "spend") args = [id, f.to.value, toWei(f.amount.value), f.purpose.value, f.evidence.value];
+  else if (fn === "appeal_revocation") args = [id, f.statement.value];
+  else if (fn === "top_up") value = toWei(f.amount.value);
+  if (await send(guard, fn.replaceAll("_", " "), fn, args, value)) load(id);
+});
+$("#grant").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target, rubric = f.rubric.value.split("\n").map((s) => s.trim()).filter(Boolean);
+  if (rubric.length > 8) return status("Use at most 8 rubric criteria.", true);
+  const args = [f.agent.value, f.objective.value, JSON.stringify(rubric), toWei(f.cap.value), Number(f.every.value), f.hours.value * 3600, f.ref.value];
+  if (await send(guard, "Grant mandate", "grant", args, toWei(f.budget.value))) { f.reset(); load(); }
+});
+wireWallet((a) => { me = a; const id = Number($("#detail").dataset.id); if (!Number.isNaN(id)) show(id); });
+load();
+</script>
+
+<footer><div class="w"><span>Built on <a href="https://genlayer.com">GenLayer</a></span><a href="docs.html">Docs</a><a href="https://github.com/cris-the-dev/genlayer-mandateguard">Source</a></div></footer>
+<script>
+document.getElementById("sites").innerHTML=[["01","proofbounty"],["02","proofbounty-v2"],["03","ic-security-audit"],["04","oracle-kit"],["05","workshop"],["06","docs-security"],["07","rainfall-insurance"],["08","dealcourt"],["09","goalstake"],["10","mandateguard"]]
+ .map(([n,s])=>`<a href="https://${s}.cristhedev.com"${s==="mandateguard"?' aria-current="page"':""}>${n}</a>`).join("");
+</script>
+</body></html>

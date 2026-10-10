@@ -19,6 +19,11 @@ agent ─────── spend(to, amount, purpose, evidence URL) ── rece
 every N spends: request_review ── validators read receipts + evidence pages ──▶ decision
 ```
 
+## Live deployment
+
+App: https://mandateguard.cristhedev.com (mandates, receipts, validator reviews and every role's actions; source in [`app/`](app/))  
+Testnet Bradbury (chainId 4221): [`0x023e18d8b4feD3b62495Cb19c384ecD1E0113BeD`](https://explorer-bradbury.genlayer.com/address/0x023e18d8b4feD3b62495Cb19c384ecD1E0113BeD)
+
 ## What it does
 
 | Layer | Mechanism | Depends on the LLM? |

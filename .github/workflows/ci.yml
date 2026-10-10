@@ -19,3 +19,5 @@ jobs:
           python deploy/shrink.py contracts/mandate_guard.py /tmp/mandate_guard.py --pack
           cp /tmp/mandate_guard.py contracts/mandate_guard.py
           pytest tests/direct/ -q
+      - name: App controls per mandate state and role
+        run: node app/check-actions.mjs app/index.html
