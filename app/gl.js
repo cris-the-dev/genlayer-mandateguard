@@ -21,11 +21,22 @@ export function contract(address) {
       const client = createClient({ chain: testnetBradbury, account });
       const hash = await client.writeContract({ address, functionName, args, value });
       onHash?.(hash);
-      const r = await client.waitForTransactionReceipt({ hash, status: "ACCEPTED", retries: 120, interval: 5000 });
-      if ((r.txExecutionResultName ?? r.tx_execution_result_name) === "FINISHED_WITH_ERROR") {
-        throw new Error("The contract rejected this transaction. Check the inputs and try again.");
+      // Poll ourselves so timeouts stop the wait instead of hanging until retries run out.
+      for (let i = 0; i < 120; i++) {
+        const t = await client.getTransaction({ hash });
+        const s = t.statusName ?? t.status_name ?? String(t.status);
+        if (s === "ACCEPTED" || s === "FINALIZED") {
+          if ((t.txExecutionResultName ?? t.tx_execution_result_name) === "FINISHED_WITH_ERROR") {
+            throw new Error("The contract rejected this transaction. Check the inputs and try again.");
+          }
+          return t;
+        }
+        if (["LEADER_TIMEOUT", "VALIDATORS_TIMEOUT", "UNDETERMINED", "CANCELED"].includes(s)) {
+          throw new Error(`Validators did not reach a decision (${s}). Nothing changed on-chain; try again.`);
+        }
+        await new Promise((ok) => setTimeout(ok, 5000));
       }
-      return r;
+      throw new Error("Still waiting for validators after 10 minutes. Check the transaction in the explorer.");
     },
   };
 }
