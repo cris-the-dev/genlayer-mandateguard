@@ -23,7 +23,7 @@ failed transfer? reconcile_payout ── funds back to the budget or to the dele
 ## Live deployment
 
 App: https://mandateguard.cristhedev.com (mandates, receipts, validator reviews and every role's actions; source in [`app/`](app/))  
-Testnet Bradbury (chainId 4221): [`0x76C56E19535A2890b3f6D24E06F037E207E8B725`](https://explorer-bradbury.genlayer.com/address/0x76C56E19535A2890b3f6D24E06F037E207E8B725)
+Testnet Bradbury (chainId 4221): [`0x637301a7Bc5F8b0b0E8bd6AC858894Ac94761BD3`](https://explorer-bradbury.genlayer.com/address/0x637301a7Bc5F8b0b0E8bd6AC858894Ac94761BD3)
 
 ## What it does
 

@@ -19,7 +19,7 @@ const client = createClient({
   chain: testnetBradbury,
   account: createAccount(process.env.PRIVATE_KEY as `0x${string}`),
 });
-const address = (process.env.MANDATEGUARD_ADDRESS ?? "0x76C56E19535A2890b3f6D24E06F037E207E8B725") as `0x${string}`;
+const address = (process.env.MANDATEGUARD_ADDRESS ?? "0x637301a7Bc5F8b0b0E8bd6AC858894Ac94761BD3") as `0x${string}`;
 const mandateId = Number(process.env.MANDATE_ID ?? 0);
 
 const toPlain = (v: any): any =>
