@@ -5,7 +5,7 @@
 </head><body>
 <div class="bar"><div class="w"><span class="who">cristhedev <span style="color:var(--line)">/</span> genlayer builds</span><nav id="sites"></nav></div></div>
 <div class="head"><div class="w"><div><h1>MandateGuard</h1><p>Consensus supervision for an AI agent's spending mandate: receipts, reviews and a continue, warn, constrain, revoke or escalate decision.</p></div><button id="connect" class="ghost" type="button">Connect wallet</button></div></div>
-<div class="meta"><div class="w"><span>contract <a href="https://explorer-bradbury.genlayer.com/address/0x023e18d8b4feD3b62495Cb19c384ecD1E0113BeD">0x023e…3BeD ↗</a></span><span>network <b>testnet bradbury</b></span><span><a href="https://github.com/cris-the-dev/genlayer-mandateguard">source ↗</a></span><span><a href="docs.html">docs →</a></span></div></div>
+<div class="meta"><div class="w"><span>contract <a href="https://explorer-bradbury.genlayer.com/address/0x76C56E19535A2890b3f6D24E06F037E207E8B725">0x76C5…B725 ↗</a></span><span>network <b>testnet bradbury</b></span><span><a href="https://github.com/cris-the-dev/genlayer-mandateguard">source ↗</a></span><span><a href="docs.html">docs →</a></span></div></div>
 <main class="w">
   <p id="status" class="status" hidden></p>
   <div class="grid">
@@ -66,7 +66,7 @@
 
 <script type="module">
 import { contract, wireWallet, send, status, gen, toWei, esc, short, $, EXPLORER } from "./gl.js";
-const guard = contract("0x023e18d8b4feD3b62495Cb19c384ecD1E0113BeD");
+const guard = contract("0x76C56E19535A2890b3f6D24E06F037E207E8B725");
 let me = null, items = [];
 const LIVE = ["ACTIVE", "WARNED", "CONSTRAINED"];
 const tagFor = (s) => ({ ACTIVE: "ok", WARNED: "on", CONSTRAINED: "on", REVOKED: "bad", ESCALATED: "bad" })[s] ?? "";
