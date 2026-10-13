@@ -180,8 +180,14 @@ def test_escalate_hands_control_to_delegator(guard, direct_vm, direct_alice, dir
         spend(direct_vm, guard, direct_bob)
     direct_vm.sender = direct_alice
     guard.resolve_escalation(0, True)
-    assert guard.get_mandate(0)["status"] == "ACTIVE"
-    assert "restore" in ledger.decisions()
+    m = guard.get_mandate(0)
+    assert m["status"] == "CONSTRAINED" and m["effective_max_per_tx"] == CAP // 2
+    last = guard.get_reviews(0)[-1]
+    assert last["decision"] == "override" and last["source"] == "delegator"
+    assert "Not a validator decision" in last["reasoning"]
+    assert [r["decision"] for r in guard.get_reviews(0)] == ["escalate", "override"]
+    assert guard.get_agent_record(to_hex(direct_bob))["reviews_passed"] == 0
+    assert "override" in ledger.decisions()
 
 
 def test_escalate_then_delegator_closes(guard, direct_vm, direct_alice, direct_bob, ledger):

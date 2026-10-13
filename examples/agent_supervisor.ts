@@ -83,6 +83,7 @@ async function main() {
       1n,
       "Example spend: 1 wei test transfer",
       "https://example.com/",
+      "", // optional sha256 of the evidence text, binding validators to this exact page
     ]);
   }
   const reviews = await read("get_reviews", [mandateId]);

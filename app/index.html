@@ -29,7 +29,9 @@
           <div><dt>constrain</dt><dd>half cap, evidence required</dd></div>
           <div><dt>revoke</dt><dd>frozen, one appeal, refund</dd></div>
           <div><dt>escalate</dt><dd>delegator decides</dd></div>
-          <div><dt>Validators agree if</dt><dd>same class, criteria ±1</dd></div>
+          <div><dt>Validators agree if</dt><dd>same decision, criteria ±1</dd></div>
+          <div><dt>Supervision</dt><dd>after the fact: a review sets future authority</dd></div>
+          <div><dt>Before a spend</dt><dd>cap, budget, expiry, optional allowlist</dd></div>
         </dl>
       </section>
       <section>
@@ -58,7 +60,7 @@
 
 <div class="steps"><ol>
   <li><small>01</small><b>Grant</b><p>The delegator escrows a budget and gives an agent an objective, a rubric, a per-spend cap, a review cadence and an expiry.</p></li>
-  <li><small>02</small><b>Spend</b><p>The agent pays through the contract. Each payment is a receipt with a purpose and an evidence link. Hard limits need no LLM.</p></li>
+  <li><small>02</small><b>Spend</b><p>The agent pays through the contract. Each payment is a receipt with a purpose, an evidence link and an optional hash of the page. Hard limits need no LLM.</p></li>
   <li><small>03</small><b>Review</b><p>Every N spends, spending stops until anyone asks for a review. Validators read the receipts and evidence pages and decide by consensus.</p></li>
 </ol></div>
 
@@ -99,13 +101,18 @@ function actions(m) {
         <label>Amount (GEN, cap ${gen(m.effective_max_per_tx, 6)})<input name="amount" type="number" step="any" min="0" required></label></div>
         <label>Purpose<input name="purpose" maxlength="280" required></label>
         <label>Evidence URL${m.status === "CONSTRAINED" ? " (required while constrained)" : ""}<input name="evidence" type="url" pattern="https://.*"${m.status === "CONSTRAINED" ? " required" : ""}></label>
+        <label>Evidence SHA-256 (optional: commits validators to this exact page text)<input name="sha" pattern="[0-9a-fA-F]{64}"></label>
         <div><button>Spend</button></div></form>`);
   if (live && m.spends_since_review > 0) out.push(b("request_review", `Ask validators to review ${m.spends_since_review} spend${m.spends_since_review > 1 ? "s" : ""}`, !m.review_due));
   if (isA && m.status === "REVOKED" && !m.appealed)
     out.push(`<form data-form="appeal_revocation"><label>Appeal statement (once, within 2 days of the revoke)<textarea name="statement" minlength="20" maxlength="1000" required></textarea></label><div><button class="ghost">Appeal revocation</button></div></form>`);
-  if (isD && m.status === "ESCALATED") out.push(`<div class="row">${b("resolve_escalation", "Restore authority", false, "", "1")}${b("resolve_escalation", "Close and refund", true, "", "0")}</div>`);
+  if (isD && m.status === "ESCALATED") out.push(`<div class="row">${b("resolve_escalation", "Restore under constraint (recorded as your override)", false, "", "1")}${b("resolve_escalation", "Close and refund", true, "", "0")}</div>`);
   if (isD && !["REVOKED", "CLOSED"].includes(m.status))
     out.push(`<form data-form="top_up" class="row" style="align-items:end"><label>Top up (GEN)<input name="amount" type="number" step="any" min="0" required></label><div><button class="ghost">Top up</button></div></form>`);
+  if (isD && m.recoverable > 0)
+    out.push(`<form data-form="recover" class="row" style="align-items:end"><label>Recover ${gen(m.recoverable, 6)} GEN from a failed refund, to<input name="to" pattern="0x[0-9a-fA-F]{40}" value="${esc(me)}" required></label><div><button>Recover</button></div></form>`);
+  if (isD && m.status !== "CLOSED")
+    out.push(`<form data-form="set_recipients"><label>Allowed recipients, one per line (empty = any)<textarea name="list">${esc((m.allowed_recipients || []).join("\n"))}</textarea></label><div><button class="ghost">Save allowlist</button></div></form>`);
   if (isD && m.status !== "CLOSED") {
     out.push(b("withdraw_remaining", "Withdraw remaining budget", true, expired || m.status === "REVOKED" ? "" : `Available after ${when(m.expires_at)}, or after a revoke`));
     out.push(b("emergency_revoke", "Emergency revoke and refund"));
@@ -117,7 +124,11 @@ function actions(m) {
 async function show(id) {
   const m = items.find((x) => x.id === id);
   if (!m) return;
-  const [receipts, reviews] = await Promise.all([guard.read("get_receipts", [id]), guard.read("get_reviews", [id])]);
+  const [receipts, reviews, payouts, acct] = await Promise.all(["get_receipts", "get_reviews", "get_payouts"].map((f) => guard.read(f, [id])).concat(guard.read("get_accounting")));
+  const party = me && [m.delegator, m.agent].some((a) => a.toLowerCase() === me.toLowerCase()), now = Date.now() / 1000;
+  const fix = (p) => party && p.status === "SENT" && now > p.reconcilable_after && acct.unaccounted >= p.amount ? ` <button class="ghost" data-act="reconcile_payout" data-arg="${p.id}">Mark failed</button>` : "";
+  const xfer = (p) => `<span class="tag ${p.status === "FAILED" ? "bad" : ""}">${p.status === "FAILED" ? "failed, restored" : "sent"}</span>${fix(p)}`;
+  const ev = (r) => r.evidence?.length ? r.evidence.map((e) => e.status).join(", ") : "–";
   const el = $("#detail");
   el.hidden = false;
   el.innerHTML = `<h2>Mandate #${m.id}</h2>
@@ -128,16 +139,23 @@ async function show(id) {
       <div><dt>Budget left</dt><dd>${gen(m.budget)} GEN</dd></div><div><dt>Cap per spend</dt><dd>${gen(m.effective_max_per_tx, 6)} GEN</dd></div>
       <div><dt>Review</dt><dd>every ${m.review_every} spends · ${m.spends_since_review} since last</dd></div>
       <div><dt>Expires</dt><dd>${when(m.expires_at)}</dd></div>
+      ${m.allowed_recipients?.length ? `<div><dt>Allowed recipients</dt><dd>${m.allowed_recipients.map(addr).join(", ")}</dd></div>` : ""}
+      ${m.recoverable > 0 ? `<div><dt>Recoverable</dt><dd>${gen(m.recoverable, 6)} GEN (failed refund)</dd></div>` : ""}
       ${m.permission_ref ? `<div><dt>Permission ref</dt><dd class="mono">${esc(m.permission_ref)}</dd></div>` : ""}
     </dl>
     <h2 style="margin-top:24px">Rubric</h2><ol style="padding-left:18px;margin:0">${m.rubric.map((c) => `<li>${esc(c)}</li>`).join("")}</ol>
     <h2 style="margin-top:24px">Receipts</h2>
-    ${receipts.length ? `<div class="tbl"><table><thead><tr><th>#</th><th>Purpose</th><th>To</th><th class="r">Amount</th><th>Evidence</th></tr></thead><tbody>
-      ${receipts.map((r, k) => `<tr><td class="num mut">${k}</td><td>${esc(r.purpose)}</td><td>${addr(r.to)}</td><td class="r num">${gen(r.amount, 6)}</td><td>${link(r.evidence_url)}</td></tr>`).join("")}
+    ${receipts.length ? `<div class="tbl"><table><thead><tr><th>#</th><th>Purpose</th><th>To</th><th class="r">Amount</th><th>Evidence</th><th>Transfer</th></tr></thead><tbody>
+      ${receipts.map((r, k) => `<tr><td class="num mut">${k}</td><td>${esc(r.purpose)}</td><td>${addr(r.to)}</td><td class="r num">${gen(r.amount, 6)}</td><td>${link(r.evidence_url)}${r.evidence_sha256 ? ` <span class="mut" title="${esc(r.evidence_sha256)}">sha256</span>` : ""}</td><td>${xfer(payouts.find((p) => p.id === r.payout_id))}</td></tr>`).join("")}
     </tbody></table></div>` : `<p class="hint">No spends yet.</p>`}
-    ${reviews.map((r, k) => `<h2 style="margin-top:24px">Review ${k + 1}${r.appeal ? " (appeal)" : ""} · decided by validator consensus</h2>
+    ${payouts.some((p) => p.kind === "refund") ? `<h2 style="margin-top:24px">Refunds</h2><div class="tbl"><table><thead><tr><th>To</th><th class="r">Amount</th><th>Transfer</th></tr></thead><tbody>
+      ${payouts.filter((p) => p.kind === "refund").map((p) => `<tr><td>${addr(p.to)}</td><td class="r num">${gen(p.amount, 6)}</td><td>${xfer(p)}</td></tr>`).join("")}
+    </tbody></table></div>` : ""}
+    ${reviews.map((r, k) => r.source === "delegator" ? `<h2 style="margin-top:24px">Entry ${k + 1} · delegator override, not a validator decision</h2>
+      <dl class="kv"><div><dt>Action</dt><dd>authority restored under constraint</dd></div><div><dt>At</dt><dd>${when(r.at)}</dd></div></dl>
+      <blockquote style="margin:12px 0 0;padding-left:12px;border-left:2px solid var(--fg)">${esc(r.reasoning)}</blockquote>` : `<h2 style="margin-top:24px">Review ${k + 1}${r.appeal ? " (appeal)" : ""} · decided by validator consensus</h2>
       <dl class="kv"><div><dt>Decision</dt><dd>${esc(r.decision)}</dd></div><div><dt>Rubric criteria met</dt><dd>${r.criteria_met} of ${r.criteria_total}</dd></div>
-      <div><dt>Spends reviewed</dt><dd>${r.reviewed_receipts}</dd></div><div><dt>At</dt><dd>${when(r.at)}</dd></div></dl>
+      <div><dt>Spends reviewed</dt><dd>${r.reviewed_receipts}</dd></div><div><dt>Evidence judged</dt><dd>${esc(ev(r))}</dd></div><div><dt>At</dt><dd>${when(r.at)}</dd></div></dl>
       ${r.reasoning ? `<blockquote style="margin:12px 0 0;padding-left:12px;border-left:2px solid var(--fg)">${esc(r.reasoning)}</blockquote>` : ""}
       ${r.violations.length ? `<ul style="padding-left:18px;margin:8px 0 0">${r.violations.map((v) => `<li>${esc(typeof v === "string" ? v : JSON.stringify(v))}</li>`).join("")}</ul>` : ""}`).join("")}
     ${actions(m)}`;
@@ -147,7 +165,7 @@ async function show(id) {
 $("#mandates").addEventListener("click", (e) => { const tr = e.target.closest("tr[data-id]"); if (tr) { e.preventDefault(); history.replaceState(null, "", `#mandate-${tr.dataset.id}`); show(Number(tr.dataset.id)); $("#detail").scrollIntoView({ behavior: "smooth" }); } });
 $("#detail").addEventListener("click", async (e) => {
   const fn = e.target.dataset?.act; if (!fn) return;
-  const id = Number($("#detail").dataset.id), args = fn === "resolve_escalation" ? [id, e.target.dataset.arg === "1"] : [id];
+  const id = Number($("#detail").dataset.id), args = fn === "resolve_escalation" ? [id, e.target.dataset.arg === "1"] : fn === "reconcile_payout" ? [Number(e.target.dataset.arg)] : [id];
   if (fn === "emergency_revoke" && !confirm("Close this mandate now and refund the remaining budget to you?")) return;
   if (await send(guard, fn.replaceAll("_", " "), fn, args)) load(id);
 });
@@ -155,7 +173,9 @@ $("#detail").addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = e.target, fn = f.dataset.form, id = Number($("#detail").dataset.id);
   let args = [id], value = 0n;
-  if (fn === "spend") args = [id, f.to.value, toWei(f.amount.value), f.purpose.value, f.evidence.value];
+  if (fn === "spend") args = [id, f.to.value, toWei(f.amount.value), f.purpose.value, f.evidence.value, f.sha.value];
+  else if (fn === "recover") args = [id, f.to.value];
+  else if (fn === "set_recipients") args = [id, JSON.stringify(f.list.value.split(/\s+/).filter(Boolean))];
   else if (fn === "appeal_revocation") args = [id, f.statement.value];
   else if (fn === "top_up") value = toWei(f.amount.value);
   if (await send(guard, fn.replaceAll("_", " "), fn, args, value)) load(id);

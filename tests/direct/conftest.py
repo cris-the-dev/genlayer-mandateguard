@@ -70,13 +70,21 @@ def guard(direct_vm, direct_deploy, direct_alice, direct_bob):
     direct_vm.value = BUDGET
     c.grant(to_hex(direct_bob), OBJECTIVE, RUBRIC, CAP, 2, 30 * DAY, "erc7710:0xabc")
     direct_vm.value = 0
+    chain_balance(direct_vm, BUDGET)
     direct_vm.mock_web(r"evidence\.example\.com", {"status": 200, "body": "Invoice: 4x A100 hours, $120"})
     return c
 
 
-def spend(vm, guard, agent, amount=GEN, purpose="Rent GPU hours for training", url="https://evidence.example.com/inv/1"):
+def chain_balance(vm, amount):
+    """The mock never moves value, so tests set the contract's balance as the chain would show it."""
+    vm.deal(vm._contract_address, amount)
+
+
+def spend(
+    vm, guard, agent, amount=GEN, purpose="Rent GPU hours for training", url="https://evidence.example.com/inv/1", sha="", to=VENDOR
+):
     vm.sender = agent
-    return guard.spend(0, VENDOR, amount, purpose, url)
+    return guard.spend(0, to, amount, purpose, url, sha)
 
 
 def verdict(vm, decision, met=3, pattern=r"supervise an autonomous AI agent"):

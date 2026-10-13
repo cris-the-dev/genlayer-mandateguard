@@ -1,6 +1,7 @@
-"""Integration tests against Studio / testnet.
+"""Integration test against Testnet Bradbury, on the packed code that is deployed:
 
-    gltest tests/integration/ -v -s --network studionet
+    python deploy/shrink.py contracts/mandate_guard.py build/mandate_guard.py --pack
+    cd tests/integration && gltest . -v -s --network testnet_bradbury   # config in this folder
 """
 
 import json
@@ -24,10 +25,13 @@ def test_spend_and_review_with_real_consensus():
     as_agent = guard.connect(agent)
     vendor = get_accounts()[2].address
     assert tx_execution_succeeded(
-        as_agent.spend(args=[0, vendor, BUDGET // 10, "Domain renewal", "https://www.iana.org/domains/reserved"]).transact()
+        as_agent.spend(args=[0, vendor, BUDGET // 10, "Domain renewal", "https://www.iana.org/domains/reserved", ""]).transact()
     )
     # review_every = 1: further spending is blocked until reviewed.
-    assert tx_execution_failed(as_agent.spend(args=[0, vendor, 1, "Another", ""]).transact())
+    assert tx_execution_failed(as_agent.spend(args=[0, vendor, 1, "Another", "", ""]).transact())
+
+    payouts = guard.get_payouts(args=[0]).call()
+    assert payouts[0]["kind"] == "spend" and payouts[0]["status"] == "SENT"
 
     receipt = guard.request_review(args=[0]).transact(wait_interval=10_000, wait_retries=30)
     assert tx_execution_succeeded(receipt)

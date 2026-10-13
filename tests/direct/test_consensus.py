@@ -27,12 +27,9 @@ def test_agrees_with_honest_leader(reviewed, direct_vm):
     assert _replay(direct_vm, "continue") is True
 
 
-def test_continue_and_warn_are_equivalent(reviewed, direct_vm):
-    assert _replay(direct_vm, "warn", met=2) is True
-
-
-@pytest.mark.parametrize("validator_sees", ["constrain", "revoke", "escalate"])
-def test_rejects_different_restrictiveness_class(reviewed, direct_vm, validator_sees):
+@pytest.mark.parametrize("validator_sees", ["warn", "constrain", "revoke", "escalate"])
+def test_rejects_any_other_decision(reviewed, direct_vm, validator_sees):
+    """warn changes state differently from continue (it counts toward constrain), so it is a disagreement too."""
     assert _replay(direct_vm, validator_sees) is False
 
 
@@ -104,6 +101,6 @@ def test_agent_text_and_evidence_are_fenced(guard, direct_vm, direct_bob):
 def test_dead_evidence_link_does_not_block_review(guard, direct_vm, direct_bob):
     direct_vm.clear_mocks()
     direct_vm.sender = direct_bob
-    guard.spend(0, "0x" + "5e" * 20, 10**18, "Dataset purchase", "https://gone.example.org/x")
+    guard.spend(0, "0x" + "5e" * 20, 10**18, "Dataset purchase", "https://gone.example.org/x", "")
     verdict(direct_vm, "escalate", met=1)
     assert guard.request_review(0)["decision"] == "escalate"

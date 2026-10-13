@@ -1,0 +1,19 @@
+# Integration runs on Testnet Bradbury, from this folder, against the packed code:
+#   python deploy/shrink.py contracts/mandate_guard.py build/mandate_guard.py --pack
+#   cd tests/integration && gltest . -v -s --network testnet_bradbury
+# Keys come from the environment or tests/integration/.env (never committed).
+networks:
+  default: testnet_bradbury
+
+  testnet_bradbury:
+    accounts:
+      - "${GL_PK0}"
+      - "${GL_PK1}"
+      - "${GL_PK2}"
+    default_wait_interval: 10000
+    default_wait_retries: 60
+
+paths:
+  contracts: "../../build"
+
+environment: .env

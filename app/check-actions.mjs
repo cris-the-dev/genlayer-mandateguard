@@ -7,7 +7,7 @@ const esc = (s) => String(s ?? "");
 const gen = (w, d = 4) => (Number(w) / 1e18).toFixed(d).replace(/\.?0+$/, "");
 const make = new Function("esc", "gen", "when", "LIVE", "ctx", `let me = ctx.me; ${body}; return actions;`);
 const D = "0xd", A = "0xa", now = Date.now() / 1000;
-const base = { delegator: D, agent: A, status: "ACTIVE", expires_at: now + 9999, review_due: false, spends_since_review: 0, effective_max_per_tx: "4000000000000000", appealed: false };
+const base = { delegator: D, agent: A, status: "ACTIVE", expires_at: now + 9999, review_due: false, spends_since_review: 0, effective_max_per_tx: "4000000000000000", appealed: false, allowed_recipients: [], recoverable: 0 };
 const run = (me, m) => make(esc, gen, () => "T", ["ACTIVE", "WARNED", "CONSTRAINED"], { me })({ ...base, ...m });
 const check = (name, ok) => { console.log(ok ? "ok  " : "FAIL", name); if (!ok) process.exitCode = 1; };
 
@@ -22,4 +22,8 @@ check("agent revoked: appeal form once", run(A, { status: "REVOKED" }).includes(
 check("delegator escalated: restore and close", (run(D, { status: "ESCALATED" }).match(/resolve_escalation/g) || []).length === 2);
 check("delegator live: withdraw disabled before expiry", /withdraw_remaining"[^>]*disabled/.test(run(D, {})));
 check("delegator revoked: withdraw enabled, no top-up", /withdraw_remaining"(?![^>]*disabled)/.test(run(D, { status: "REVOKED" })) && !run(D, { status: "REVOKED" }).includes("top_up"));
+check("agent: spend form takes an evidence commitment", /name="sha"/.test(run(A, {})));
+check("delegator: allowlist until closed, agent never", run(D, {}).includes('data-form="set_recipients"') && !run(D, { status: "CLOSED" }).includes("set_recipients") && !run(A, {}).includes("set_recipients"));
+check("delegator: recover only when a refund failed", !run(D, { status: "CLOSED" }).includes('data-form="recover"') && run(D, { status: "CLOSED", recoverable: 5 }).includes('data-form="recover"'));
+check("escalation restore is labelled as an override", run(D, { status: "ESCALATED" }).includes("override"));
 check("delegator: emergency revoke until closed", run(D, {}).includes("emergency_revoke") && !run(D, { status: "CLOSED" }).includes("emergency_revoke"));
