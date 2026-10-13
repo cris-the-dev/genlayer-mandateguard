@@ -102,7 +102,7 @@ class Receipt:
     amount: u256
     purpose: str
     evidence_url: str
-    evidence_sha256: str  # optional commitment to the evidence text at spend time
+    evidence_sha256: str  # optional sha256 of the evidence response body at spend time
     payout_id: u256
     at: u256
 
@@ -167,11 +167,20 @@ def _fetch(url: str, commitment: str) -> tuple:
     """Evidence text for the prompt plus a record of exactly what was judged."""
     if not url:
         return "(no evidence URL)", {"status": "none", "sha256": "", "chars": 0}
+    # A plain GET, not a browser render: the commitment is the SHA-256 of the
+    # exact response bytes (reproducible with `curl -s URL | sha256sum`), and a
+    # GET is far lighter for every validator than a headless render.
     try:
-        text = str(gl.nondet.web.render(url, mode="text"))
+        resp = gl.nondet.web.get(url)
     except Exception:
+        resp = None
+    if resp is None or resp.status >= 400 or not resp.body:
         return "[UNAVAILABLE]", {"status": "unavailable", "sha256": "", "chars": 0}
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(resp.body).hexdigest()
+    text = resp.body.decode("utf-8", errors="replace")
+    if "<html" in text[:1000].lower():
+        text = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", text)
+        text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text)).strip()
     status = "ok" if not commitment else ("match" if digest == commitment else "changed")
     shown = text[:MAX_EVIDENCE_CHARS]
     if len(text) > MAX_EVIDENCE_CHARS:

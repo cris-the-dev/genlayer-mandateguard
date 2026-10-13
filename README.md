@@ -71,12 +71,13 @@ missing invoice is itself evidence.
 ## Evidence integrity
 
 Evidence URLs are mutable, so `spend` takes an optional `evidence_sha256`: the
-SHA-256 of the page text the agent is relying on. At review time each
-validator hashes what it fetches:
+SHA-256 of the HTTP response body the agent is relying on (`curl -s URL |
+sha256sum`). Evidence is fetched with a plain GET, not a browser render, so the
+hash is reproducible. At review time each validator hashes what it fetches:
 
 - `match`: the prompt marks the page as verified, identical to spend time;
 - `changed`: the prompt flags it as edited after the spend (weak evidence);
-- `unavailable`: no evidence for that spend.
+- `unavailable`: fetch failed or HTTP status >= 400; no evidence for that spend.
 
 Because the status is deterministic for committed receipts, validators reject a
 leader that reports a different one. Every review stores, per receipt, the
@@ -147,7 +148,7 @@ the latest review to the Internet Court `AgentReviewDecision` payload.
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 genvm-lint check contracts/mandate_guard.py
-pytest tests/direct -v                         # 52 tests
+pytest tests/direct -v                         # 53 tests
 # integration, on Bradbury, against the packed code (keys in GL_PK0..2 env vars)
 python deploy/shrink.py contracts/mandate_guard.py build/mandate_guard.py --pack
 cd tests/integration && gltest . -v -s --network testnet_bradbury
@@ -155,16 +156,16 @@ cd tests/integration && gltest . -v -s --network testnet_bradbury
 
 ### Deploying to Testnet Bradbury
 
-The source is 35.7 KB; Bradbury rejects deploys above ~20 KB of code. Deploy
-the output of `deploy/shrink.py` (AST-checked; 8.9 KB packed). CI re-runs all
-52 direct tests against the packed code.
+The source is 36.2 KB; Bradbury rejects deploys above ~20 KB of code. Deploy
+the output of `deploy/shrink.py` (AST-checked; 9.0 KB packed). CI re-runs all
+53 direct tests against the packed code.
 
 ```bash
 python deploy/shrink.py contracts/mandate_guard.py build/mandate_guard.py --pack
 genlayer network && genlayer deploy --contract build/mandate_guard.py
 ```
 
-## Tests (52 direct)
+## Tests (53 direct)
 
 - **Mandate lifecycle** — grant validation; spend receipts, transfers and events; hard limits independent of the LLM; review gating and keeper-triggered reviews; warn→warn escalation to constrain; constrained half-cap + mandatory evidence and recovery; revoke → appeal window → refund; successful appeal restores authority and reputation; failed appeal is final and not double counted; escalation restored or closed by the delegator; emergency revoke; expiry; top-up; decision events carry `permission_ref` with correctly bound indexed fields.
 - **Consensus (validator replay)** — agrees with honest variation; rejects any different decision (including continue vs warn), criteria disagreement, a whitewashing leader, a griefing revoke, malformed/oversized payloads, fake transient errors and LLM errors; unknown labels revert; agent text and evidence are fenced; dead links don't block reviews.

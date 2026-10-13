@@ -251,3 +251,12 @@ def test_conflicting_validators_cannot_finalize_a_revoke(guard, direct_vm, direc
     assert direct_vm.run_validator(leader_result={**stored, "decision": "revoke"}) is False
     assert direct_vm.run_validator(leader_result={**stored, "decision": "warn"}) is False
     assert direct_vm.run_validator(leader_result={**stored, "evidence": []}) is False
+
+
+def test_http_error_is_unavailable(guard, direct_vm, direct_bob):
+    spend(direct_vm, guard, direct_bob)
+    direct_vm.clear_mocks()
+    direct_vm.mock_web(r"evidence\.example\.com", {"status": 404, "body": "Not Found"})
+    verdict(direct_vm, "escalate", 1)
+    guard.request_review(0)
+    assert guard.get_reviews(0)[0]["evidence"][0]["status"] == "unavailable"
