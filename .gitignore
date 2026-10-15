@@ -27,3 +27,4 @@ artifacts/
 .pytest_cache/
 *.tsbuildinfo
 build/
+.venv/

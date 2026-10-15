@@ -21,11 +21,13 @@ authority, it does not approve each payment before it is sent. Spends are
 bounded up front only by deterministic rules (per-tx cap, budget, review
 gating, optional recipient allowlist, expiry).
 
-Payments are emitted value transfers that settle after the transaction is
-finalized. Every transfer is recorded as a payout; if one is later shown to
-have failed (the funds are still in the contract after the settle window),
-`reconcile_payout` restores it to the budget or to the delegator's
-recoverable balance, so no spend record or refund is lost.
+Payments are emitted value transfers, executed by the consensus layer when
+the paying transaction finalizes. Every transfer is recorded as a payout and
+settled from that transfer's own result: `settle_payout` has validators read
+the paying transaction and its finalization receipt from the chain RPC and
+agree whether this payout's transfer was delivered or failed. A failed one is
+restored to the budget or to the delegator's recoverable balance, so no spend
+record or refund is lost.
 """
 
 import hashlib
@@ -49,6 +51,7 @@ ESCALATED = "ESCALATED"
 CLOSED = "CLOSED"
 
 SENT = "SENT"
+DELIVERED = "DELIVERED"
 FAILED = "FAILED"
 
 DECISIONS = ("continue", "warn", "constrain", "revoke", "escalate")
@@ -60,10 +63,26 @@ MAX_EVIDENCE_CHARS = 3_000
 MAX_REASONING = 400
 MAX_RECIPIENTS = 20
 APPEAL_WINDOW = 2 * 86_400
-# ponytail: a transfer still in flight looks the same as a failed one, so a
-# payout can only be reconciled after this window; shorten it once GenVM
-# exposes child-transfer results to contracts.
-SETTLE_WINDOW = 86_400
+
+# Transfer results on Testnet Bradbury. When a paying transaction finalizes,
+# the consensus contract executes its value transfer through this contract's
+# ghost account on the EVM layer, in the same EVM transaction that emits
+# TransactionFinalized. The ghost emits TransactionExecuted(to, msgId, data)
+# only if the value call succeeded, and the messages contract links the
+# message to its parent with MessagesOnFinalization(txId, msgId).
+RPC_URL = "https://rpc-bradbury.genlayer.com"
+CONSENSUS_MAIN = "0x0112bf6e83497965a5fdd6dad1e447a6e004271d"
+CONSENSUS_MESSAGES = "0x27872802226532fcd7fea2f00addbffbd3380ade"
+T_FINALIZED = "0x24196ec40f90671b7144e716978686b4f3c7d6b00b23da3971ef2b52af27d87f"
+T_EXECUTED = "0x4aacc1769103d0575734a31601a30d8f74c7843414f868342af438b4fdc4d78e"
+T_MESSAGE = "0x1a2b93b175bf31d44b127b5c4c0f72cbf128f5230ad594a52a00dfa559c96b51"
+T_INTERNAL = "0xfcd4925545581224af98ce36b42d51bb88917ea0c3fe675c27e1df1a22282555"
+GEN_FINALIZED = 7
+GEN_RETURNED = 1  # txExecutionResult: FINISHED_WITH_RETURN
+# Every write that pays sends exactly one transfer; these are the methods
+# that can create a payout of each kind.
+PAYING = {"spend": ("spend",), "refund": ("emergency_revoke", "withdraw_remaining", "resolve_escalation", "recover")}
+TX_RE = re.compile(r"^0x[0-9a-f]{64}$")
 URL_RE = re.compile(r"^https://[A-Za-z0-9.-]+\.[A-Za-z]{2,}(/[^\s]*)?$")
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -130,8 +149,10 @@ class Payout:
     to: Address
     amount: u256
     kind: str  # "spend" or "refund"
-    status: str  # SENT or FAILED
-    at: u256
+    status: str  # SENT, DELIVERED or FAILED
+    sender: Address  # who sent the paying transaction
+    at: u256  # its creation time: (sender, at) identifies the paying transaction
+    tx: str  # paying transaction, once settled
 
 
 @gl.evm.contract_interface
@@ -301,10 +322,10 @@ def _validate(p: dict, leader_result) -> bool:
     )
 
 
-def _agree_on_error(leader_result, p: dict) -> bool:
+def _agree_on_error(leader_result, p: dict, fn=None) -> bool:
     msg = getattr(leader_result, "message", "")
     try:
-        _review(p)
+        (fn or _review)(p)
         return False
     except gl.vm.UserError as e:
         if e.message.startswith(ERR_EXPECTED) or e.message.startswith(ERR_EXTERNAL):
@@ -314,6 +335,94 @@ def _agree_on_error(leader_result, p: dict) -> bool:
         return False
     except Exception:
         return False
+
+
+def _rpc(method: str, params: list):
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+    try:
+        # An explicit User-Agent: the RPC's edge rejects some default client agents.
+        resp = gl.nondet.web.post(RPC_URL, body=body, headers={"Content-Type": "application/json", "User-Agent": "MandateGuard"})
+        out = json.loads(resp.body)
+    except Exception:
+        raise gl.vm.UserError(f"{ERR_TRANSIENT} chain RPC unavailable")
+    if not isinstance(out, dict) or not isinstance(out.get("result"), dict):
+        raise gl.vm.UserError(f"{ERR_EXPECTED} {method}: transaction not found")
+    return out["result"]
+
+
+def _payload(b: bytes) -> dict:
+    """Calldata of a GenLayer write: the first item of the RLP list [calldata, flags]."""
+
+    def head(i):
+        x = b[i]
+        if x < 0x80:
+            return i, 1
+        if x < 0xB8 or 0xC0 <= x < 0xF8:
+            return i + 1, x - (0x80 if x < 0xC0 else 0xC0)
+        n = x - (0xB7 if x < 0xC0 else 0xF7)
+        return i + 1 + n, int.from_bytes(b[i + 1 : i + 1 + n], "big")
+
+    try:
+        i, _ = head(0)
+        j, n = head(i)
+        out = gl.calldata.decode(b[j : j + n])
+    except Exception:
+        out = None
+    if not isinstance(out, dict) or not isinstance(out.get("args"), list):
+        raise gl.vm.UserError(f"{ERR_EXPECTED} unreadable calldata in the paying transaction")
+    return out
+
+
+def _hex(a) -> str:
+    return (a.as_hex if hasattr(a, "as_hex") else str(a)).lower()
+
+
+def _transfer_result(q: dict) -> str:
+    """'delivered' or 'failed' for one payout, read from the chain. `q` holds plain values."""
+    tx = _rpc("gen_getTransactionReceipt", [{"txId": q["tx"]}])
+    created = (tx.get("timestamps") or {}).get("Created")
+    if (
+        str(tx.get("recipient", "")).lower() != q["contract"]
+        or str(tx.get("sender", "")).lower() != q["sender"]
+        or created != q["at"]
+        or tx.get("txExecutionResult") != GEN_RETURNED
+    ):
+        raise gl.vm.UserError(f"{ERR_EXPECTED} that transaction did not create this payout")
+    call = _payload(bytes.fromhex(str(tx.get("txCallData", "")).removeprefix("0x")))
+    a = call["args"]
+    ok = call.get("method") in PAYING[q["kind"]] and len(a) >= 1 and a[0] == q["mandate_id"]
+    if ok and call["method"] == "spend":
+        ok = len(a) >= 3 and _hex(a[1]) == q["to"] and a[2] == q["amount"]
+    elif ok and call["method"] == "recover":
+        ok = len(a) >= 2 and _hex(a[1]) == q["to"]
+    elif ok and call["method"] == "resolve_escalation":
+        ok = len(a) >= 2 and a[1] is False
+    if not ok:
+        raise gl.vm.UserError(f"{ERR_EXPECTED} that transaction did not create this payout")
+    if tx.get("status") != GEN_FINALIZED:
+        raise gl.vm.UserError(f"{ERR_EXPECTED} paying transaction not finalized yet")
+
+    rc = _rpc("eth_getTransactionReceipt", [q["finalize_tx"]])
+    logs = [
+        (str(lg.get("address", "")).lower(), [str(t).lower() for t in lg.get("topics") or []], str(lg.get("data", "")).lower())
+        for lg in rc.get("logs") or []
+        if isinstance(lg, dict)
+    ]
+    if rc.get("status") != "0x1" or not any(
+        addr == CONSENSUS_MAIN and t[:2] == [T_FINALIZED, q["tx"]] for addr, t, _ in logs
+    ):
+        raise gl.vm.UserError(f"{ERR_EXPECTED} finalize_tx is not the finalization of the paying transaction")
+    to_topic = "0x" + q["to"][2:].rjust(64, "0")
+    msg_ids = {t[2] for addr, t, _ in logs if addr == CONSENSUS_MESSAGES and len(t) == 3 and t[:2] == [T_MESSAGE, q["tx"]]}
+    for addr, t, data in logs:
+        if addr == q["contract"] and t[:2] == [T_EXECUTED, to_topic] and data[:66] in msg_ids:
+            return "delivered"
+        # ponytail: a transfer to another GenLayer contract becomes its own
+        # transaction; it is never treated as failed, so a value that arrived
+        # cannot be credited back. Read the child's result if such payees matter.
+        if addr == CONSENSUS_MAIN and len(t) >= 3 and t[0] == T_INTERNAL and t[2] == to_topic:
+            return "delivered"
+    return "failed"
 
 
 def _add(a, b) -> u256:
@@ -332,7 +441,9 @@ class MandateGuard(gl.Contract):
     reviewed_upto: TreeMap[str, u256]  # "mid" -> first receipt of the last review
     payouts: DynArray[Payout]
     payout_index: TreeMap[str, u256]  # "mid:k" -> index in payouts
-    expected_balance: u256  # deposits minus transfers sent
+    payout_keys: TreeMap[str, u256]  # "sender:at" -> payout id, one per transaction
+    settled_txs: TreeMap[str, u256]  # paying transaction -> payout id
+    expected_balance: u256  # deposits minus transfers not known to have failed
     agent_reviews_passed: TreeMap[Address, u256]
     agent_revocations: TreeMap[Address, u256]
 
@@ -576,26 +687,55 @@ class MandateGuard(gl.Contract):
         start = int(self.reviewed_upto.get(str(mandate_id), u256(0)))
         return self._run_review(m, start, appeal_statement=statement)
 
-    # ── Payout reconciliation (delegator or agent) ───────────────────────────
+    # ── Payout settlement (anyone) ───────────────────────────────────────────
 
     @gl.public.write
-    def reconcile_payout(self, payout_id: int) -> str:
-        """Mark a transfer as failed once the contract still holds its funds
-        after the settle window; the amount returns to the budget, or to the
-        delegator's recoverable balance if the mandate is closed."""
+    def settle_payout(self, payout_id: int, tx_hash: str, finalize_tx: str) -> str:
+        """Settle one payout from its own transfer result. `tx_hash` is the
+        GenLayer transaction that created the payout; `finalize_tx` is the
+        consensus-layer transaction that finalized it (and executed the
+        transfer). Validators read both from the chain and must agree."""
         if payout_id < 0 or payout_id >= len(self.payouts):
             raise gl.vm.UserError(f"{ERR_EXPECTED} payout not found")
         p = self.payouts[payout_id]
-        m = self._m(int(p.mandate_id))
-        if gl.message.sender_address not in (m.delegator, m.agent):
-            raise gl.vm.UserError(f"{ERR_EXPECTED} not authorised")
         if p.status != SENT:
-            raise gl.vm.UserError(f"{ERR_EXPECTED} payout already reconciled")
-        if _now() < int(p.at) + SETTLE_WINDOW:
-            raise gl.vm.UserError(f"{ERR_EXPECTED} transfer may still be settling")
-        unaccounted = int(self.balance) - int(self.expected_balance)
-        if unaccounted < int(p.amount):
-            raise gl.vm.UserError(f"{ERR_EXPECTED} transfer delivered: no unaccounted funds in the contract")
+            raise gl.vm.UserError(f"{ERR_EXPECTED} payout already settled")
+        tx_hash, finalize_tx = tx_hash.strip().lower(), finalize_tx.strip().lower()
+        if not TX_RE.match(tx_hash) or not TX_RE.match(finalize_tx):
+            raise gl.vm.UserError(f"{ERR_EXPECTED} transaction hashes must be 0x + 64 hex")
+        if tx_hash in self.settled_txs:
+            raise gl.vm.UserError(f"{ERR_EXPECTED} that transaction already settled a payout")
+        q = {
+            "contract": gl.message.contract_address.as_hex.lower(),
+            "mandate_id": int(p.mandate_id),
+            "to": p.to.as_hex.lower(),
+            "amount": int(p.amount),
+            "kind": p.kind,
+            "sender": p.sender.as_hex.lower(),
+            "at": int(p.at),
+            "tx": tx_hash,
+            "finalize_tx": finalize_tx,
+        }
+
+        def leader_fn() -> str:
+            return _transfer_result(q)
+
+        def validator_fn(res) -> bool:
+            if not isinstance(res, gl.vm.Return):
+                return _agree_on_error(res, q, _transfer_result)
+            try:
+                return res.calldata == _transfer_result(q)
+            except Exception:
+                return False
+
+        result = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
+        m = self._m(int(p.mandate_id))
+        p.tx = tx_hash
+        self.settled_txs[tx_hash] = u256(payout_id)
+        if result == "delivered":
+            p.status = DELIVERED
+            self._emit(m, "payout_delivered", p.kind)
+            return DELIVERED
         p.status = FAILED
         self.expected_balance = _add(self.expected_balance, p.amount)
         if p.kind == "spend" and m.status != CLOSED:
@@ -683,8 +823,9 @@ class MandateGuard(gl.Contract):
                     "amount": int(p.amount),
                     "kind": p.kind,
                     "status": p.status,
+                    "sender": p.sender.as_hex,
                     "at": int(p.at),
-                    "reconcilable_after": int(p.at) + SETTLE_WINDOW,
+                    "tx": p.tx,
                 }
             )
         return out
@@ -713,8 +854,8 @@ class MandateGuard(gl.Contract):
 
     @gl.public.view
     def get_accounting(self) -> dict:
-        """Contract balance vs. what it should hold; a positive difference after
-        the settle window means a transfer failed and can be reconciled."""
+        """Contract balance vs. what it should hold. Informational only: payouts
+        are settled from their own transfer results, never from this difference."""
         return {
             "balance": int(self.balance),
             "expected_balance": int(self.expected_balance),
@@ -757,10 +898,19 @@ class MandateGuard(gl.Contract):
     def _pay(self, m: Mandate, to: Address, amount: int, kind: str) -> int:
         if int(self.balance) < amount:
             raise gl.vm.UserError(f"{ERR_EXTERNAL} contract balance below payout; nothing was sent")
+        sender, now = gl.message.sender_address, _now()
+        # (sender, creation second) is how settle_payout finds the paying
+        # transaction, so it must be unique.
+        key = f"{sender.as_hex.lower()}:{now}"
+        if key in self.payout_keys:
+            raise gl.vm.UserError(f"{ERR_EXPECTED} one payment per sender per second; retry")
         self.payouts.append(
-            Payout(mandate_id=m.id, to=to, amount=u256(amount), kind=kind, status=SENT, at=u256(_now()))
+            Payout(
+                mandate_id=m.id, to=to, amount=u256(amount), kind=kind, status=SENT, sender=sender, at=u256(now), tx=""
+            )
         )
         pid = len(self.payouts) - 1
+        self.payout_keys[key] = u256(pid)
         k = int(m.payout_count)
         self.payout_index[f"{int(m.id)}:{k}"] = u256(pid)
         m.payout_count = u256(k + 1)

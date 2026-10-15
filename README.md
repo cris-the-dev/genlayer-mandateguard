@@ -17,48 +17,45 @@ on-chain code.
 delegator ── grant(budget, objective, rubric, per-tx cap, review cadence, expiry) ──▶ MandateGuard
 agent ─────── spend(to, amount, purpose, evidence URL, sha256?) ── receipt + payout ─▶ vendor
 every N spends: request_review ── validators read receipts + evidence pages ──▶ decision
-failed transfer? reconcile_payout ── funds back to the budget or to the delegator
+after finalization: settle_payout ── validators read that transfer's result; failed → budget or delegator
 ```
 
 ## Live deployment
 
 App: https://mandateguard.cristhedev.com (mandates, receipts, validator reviews and every role's actions; source in [`app/`](app/))  
-Testnet Bradbury (chainId 4221): [`0x637301a7Bc5F8b0b0E8bd6AC858894Ac94761BD3`](https://explorer-bradbury.genlayer.com/address/0x637301a7Bc5F8b0b0E8bd6AC858894Ac94761BD3)
+Testnet Bradbury (chainId 4221): [`0xa66bfADc1F2A49de8465577dd55ba5E1ED7d9256`](https://explorer-bradbury.genlayer.com/address/0xa66bfADc1F2A49de8465577dd55ba5E1ED7d9256)
 
 ## Bradbury evidence
 
-Contract `0x637301a7Bc5F8b0b0E8bd6AC858894Ac94761BD3` (deploy [`0x4db6966e…`](https://explorer-bradbury.genlayer.com/tx/0x4db6966e30c6d84cccf10dc8c72fb2440089c59a24478f66a5b3433eb59eff38)), on-chain code identical to `build/mandate_guard.py` (sha256 `b12fc8a6…`). Driver: one transaction per step, delegator, agent and vendor are separate accounts.
+Run by [`tests/integration/test_mandate_guard.py`](tests/integration/test_mandate_guard.py) (6 passed, 41 min). Contract `0xa66bfADc1F2A49de8465577dd55ba5E1ED7d9256` (deploy [`0x6ddfd322…`](https://explorer-bradbury.genlayer.com/tx/0x6ddfd32237d51cbcd0dc95da96e7d29de485a27aaf6eb33707fb5e13c9052e9d)), code `build/mandate_guard.py` (sha256 `a9ef69a0…`). Delegator, agent and vendor are separate accounts.
 
 | Mandate | Step | Transaction | Outcome |
 |---|---|---|---|
-| #0 | grant 0.004 GEN, cap 0.002, review every 2 | [`0xf97812e9…`](https://explorer-bradbury.genlayer.com/tx/0xf97812e9003307e8ec1207239d6367f492f6b87b286d7ec0df98c6e4bda95174) | accepted |
-| #0 | recipient allowlist | [`0xa45a8d73…`](https://explorer-bradbury.genlayer.com/tx/0xa45a8d739cb8c922cbadec345ddd42cabef9abb5b1e41b2c2deb191d5df99915) | accepted |
-| #0 | top up 0.001 GEN | [`0xc9ad693f…`](https://explorer-bradbury.genlayer.com/tx/0xc9ad693f25b8b0501e5d805b67555f26d10fe37068a52407139359998e7ccb1c) | accepted |
-| #0 | spend, evidence committed (sha256) | [`0xf1e8055c…`](https://explorer-bradbury.genlayer.com/tx/0xf1e8055c0169976fd254f502f587fa24389a2564a7fef8ddd9531e1d8f8ec608) | accepted |
-| #0 | spend, LICENSE as evidence | [`0x141afa7e…`](https://explorer-bradbury.genlayer.com/tx/0x141afa7ebe415d985df44af757f095058f554bec880fb242c468e0af039fc354) | accepted |
-| #0 | review | [`0xa08b1059…`](https://explorer-bradbury.genlayer.com/tx/0xa08b1059032194465916817e75e17b391ff5355510c20c85d9d87a191be62eb7) | UNDETERMINED: leader said warn (LICENSE is not docs/examples/tests), validators split; state unchanged |
-| #0 | withdraw after expiry | [`0x6c615fe1…`](https://explorer-bradbury.genlayer.com/tx/0x6c615fe12a758ca073b4e40712df2b147f43711d0b3c3b48ae8f7e7e36a084f9) | finalized: CLOSED, refund payout SENT |
-| #1 | grant, review every spend | [`0x9d0b8382…`](https://explorer-bradbury.genlayer.com/tx/0x9d0b8382e6fbc619613cc8d885aa504c6a295d21aedd9bc28399133d23d0d546) | finalized |
-| #1 | spend for tests/direct/test_safety.py, sha committed | [`0xd29e8a5e…`](https://explorer-bradbury.genlayer.com/tx/0xd29e8a5e541554d081021355c6f7022d1db1c32105df7a2eed037a3adcf3f132) | accepted |
-| #1 | review | [`0xbc429f50…`](https://explorer-bradbury.genlayer.com/tx/0xbc429f50f99796f40cd06f6392d5283e2de5694e8e47f91fd6475e662ca7d2f9) | accepted: **continue**, 3/3 criteria, evidence **match** |
-| #1 | spend for README | [`0xf973eb0d…`](https://explorer-bradbury.genlayer.com/tx/0xf973eb0dcb947d01ef632a7747bdaedfefb590d1e574fa81d93900e6ca3d84f8) | accepted |
-| #1 | review | [`0x2165a841…`](https://explorer-bradbury.genlayer.com/tx/0x2165a84157b7a22f239a5754ad2dc3671afdb3e4fb4a1e73986b515635f8ff7e) | accepted: **continue**, 4 of 5 agree |
-| #2 | grant | [`0xe6a3d69c…`](https://explorer-bradbury.genlayer.com/tx/0xe6a3d69ccce359c4da41c3d498857a6295b6dd06d2fed7426da6fa0e681d2073) | accepted |
-| #2 | spend 0.002 GEN (over the rubric's 0.001 limit) | [`0x84294559…`](https://explorer-bradbury.genlayer.com/tx/0x842945592e16201482b2e764dcb7abe32c274f6c3db1fc6a137f5d281a5b246b) | accepted |
-| #2 | review | [`0xd6b68b80…`](https://explorer-bradbury.genlayer.com/tx/0xd6b68b808ddcf812caed3fafd137ee24a386a02f03ea99bae5838419a13bff66) | finalized: **constrain** (spend is twice the rubric limit), per-spend cap halved to 0.001 GEN; two earlier attempts hit LEADER_TIMEOUT and changed nothing |
-| #2 | emergency revoke | [`0x28b4c2f8…`](https://explorer-bradbury.genlayer.com/tx/0x28b4c2f86131e2ddc77b5206af1f0f371b95c41c3b1e19a26e3d328c4c1b979f) | accepted: CLOSED, remaining budget refunded |
-| #3 | grant | [`0xb3448fae…`](https://explorer-bradbury.genlayer.com/tx/0xb3448faead4eabc0128012eda1e03c06cb3ca48d12a1229c78241aa1581be446) | accepted |
-| #3 | spend on a gaming headset | [`0xa3c72323…`](https://explorer-bradbury.genlayer.com/tx/0xa3c72323418e071f99eb5e5c28c8e8135ddf50c1f5e80af5f202a8b436385e4b) | accepted |
-| #3 | review | [`0xdbad092a…`](https://explorer-bradbury.genlayer.com/tx/0xdbad092a2d9f79735937e2d6308ba51a6403cef18e91d1b4b9bab4a45c4f44b4) | finalized: **revoke**, 1/3 criteria (headset out of scope, LICENSE shows no paid work) |
-| #3 | agent appeal | [`0x88bd387d…`](https://explorer-bradbury.genlayer.com/tx/0x88bd387dcfa5c2f52ecd7c43eff0f55c24a47611e766a863b16c778710c4dea2) | finalized: re-review upholds **revoke** |
-| #3 | withdraw | [`0xe042450f…`](https://explorer-bradbury.genlayer.com/tx/0xe042450f3af555cad35a50d77d7198215848c8d5602b8aaceb6009b72fd6833a) | accepted: CLOSED, remaining budget refunded |
-| #4 | grant | [`0x3d45cfed…`](https://explorer-bradbury.genlayer.com/tx/0x3d45cfed95a7870f74d0284f33c43f56d0338106e320da7237abfa415980e265) | accepted |
-| #4 | spend, evidence URL returns 404 | [`0x78c19a9b…`](https://explorer-bradbury.genlayer.com/tx/0x78c19a9b7a43e9ffffdd7bc61f046252aa351da9eb0a434e6129c33c78c6ac4f) | finalized |
-| #4 | review | [`0x14efb00b…`](https://explorer-bradbury.genlayer.com/tx/0x14efb00be1e1fcbfba7de517b07b3dc7f78ce2048796cd0a5279a3376e976e02) | accepted: **escalate**, evidence `unavailable` |
-| #4 | delegator restores | [`0x8f13aa4b…`](https://explorer-bradbury.genlayer.com/tx/0x8f13aa4b4794430c22f524cdffc7789e252e1c09682fab89cade5076fdf69ce2) | accepted: review recorded as `override` by `delegator`, mandate CONSTRAINED |
-| #4 | emergency revoke | [`0x9009d569…`](https://explorer-bradbury.genlayer.com/tx/0x9009d569bb676f25ec1cec95424eee0481ab1e9c049478ad763c1a480312ccfc) | finalized: CLOSED, remaining budget refunded |
+| #0 | grant 0.005 GEN, cap 0.002, review every spend | [`0xf1a5307b…`](https://explorer-bradbury.genlayer.com/tx/0xf1a5307b04073b5112bca6e31f1fb53dfaadb35a70e1fcf6112c34952d0e92cf) | finalized |
+| #1 | grant 0.001 GEN | [`0x355cd7ad…`](https://explorer-bradbury.genlayer.com/tx/0x355cd7ad941c453144bdbd6fff8679ab3e7bea2e2d0c9160311e865193527b96) | finalized |
+| #0 | spend 0.001, purpose names no contributor | [`0x36b8abff…`](https://explorer-bradbury.genlayer.com/tx/0x36b8abff433808d4708175a00dbdb3d509ebb8cd6490f3e346ca5123bf951bcc) | payout 0 SENT |
+| #0 | review | [`0x2ca21e89…`](https://explorer-bradbury.genlayer.com/tx/0x2ca21e8949d0f40f19b637ef3589967d69b1f7a09f73dfb13455f14bd70dee00) | **warn**, 2/3 criteria (no GitHub handle): WARNED |
+| #0 | spend 0.002 (twice the rubric limit) | [`0x255f6fe9…`](https://explorer-bradbury.genlayer.com/tx/0x255f6fe9dd156f308ffda36be6dfbc7516b52ca5be3ddba04ad3a5603acc9f7e) | payout 1 SENT |
+| #0 | review | [`0xe02883f8…`](https://explorer-bradbury.genlayer.com/tx/0xe02883f8c4674849ee8500f315b2696de79a1ef2b81fa76e91e38b0b2ab4d001) | **constrain**: CONSTRAINED, cap halved, evidence mandatory |
+| #0 | spend 0.001 + 1 wei | [`0x026bb6d2…`](https://explorer-bradbury.genlayer.com/tx/0x026bb6d22021fb22e85231696e724d530365cae339e39895964843c231514a75) | rejected: over the halved cap |
+| #0 | spend without evidence URL | [`0xf724e70a…`](https://explorer-bradbury.genlayer.com/tx/0xf724e70aa25c9cb52586814d3a82c4eb72423690f71d0769e322c229fbf7c077) | rejected: evidence mandatory |
+| #0 | spend on a gaming headset | [`0x445affaf…`](https://explorer-bradbury.genlayer.com/tx/0x445affaf3a8c97eb685d7a90b5fa48d6613cdccff284515d2f360d822a4f9ee3) | payout 2 SENT |
+| #0 | review | [`0xc0068453…`](https://explorer-bradbury.genlayer.com/tx/0xc0068453bb01dc3b51e9a4fdbc0c488e1c83ef0309b7f6912b08a381d6ea1e0a) | **revoke** (headset out of scope): REVOKED |
+| #0 | agent appeal | [`0xc6eb5646…`](https://explorer-bradbury.genlayer.com/tx/0xc6eb56466c789d31b95ed4f5ec2c6e55f2955f58e5e0d56ea075151c7933d093) | re-review upholds **revoke** |
+| #0 | withdraw | [`0xe367886a…`](https://explorer-bradbury.genlayer.com/tx/0xe367886a2fad25993ba29c73618e31642d3a920d4ee0ce487a5eafffb8e5c3dc) | CLOSED, refund payout 3 (0.001) SENT |
+| #1 | spend 0.001 to an EVM contract that rejects value | [`0x2bd93180…`](https://explorer-bradbury.genlayer.com/tx/0x2bd931809390512088a4ab1c1a5df57819c08d6997bc1320395b89372b6c9cb2) | payout 4 SENT, budget 0 |
 
-After the run `get_accounting` reports `unaccounted: 0`: every payout and refund reached its recipient. Mandate #1 is left ACTIVE.
+Each payout settled from its own transfer, after the paying transaction finalized. Balance change is the recipient's `eth_getBalance` at the finalizing block minus the block before, checked by the test:
+
+| Payout | Kind | Paid by | Finalized by (block) | Recipient balance | `settle_payout` | Result |
+|---|---|---|---|---|---|---|
+| 0 | spend → vendor | [`0x36b8abff…`](https://explorer-bradbury.genlayer.com/tx/0x36b8abff433808d4708175a00dbdb3d509ebb8cd6490f3e346ca5123bf951bcc) | [`0x55206a6f…`](https://explorer-bradbury.genlayer.com/tx/0x55206a6f28ccf0ca499c8a47b8de14a3a61719877db15cb34e00b3040774bb8e) (25245291) | +0.001 GEN | [`0x9e562af7…`](https://explorer-bradbury.genlayer.com/tx/0x9e562af7915e6e7f8d22083b4b0bf8bdb9237f8c573f26137237f24ca7a19c42) | DELIVERED |
+| 1 | spend → vendor | [`0x255f6fe9…`](https://explorer-bradbury.genlayer.com/tx/0x255f6fe9dd156f308ffda36be6dfbc7516b52ca5be3ddba04ad3a5603acc9f7e) | [`0xd3c375f9…`](https://explorer-bradbury.genlayer.com/tx/0xd3c375f958e47390a8bcd42812052eb4cbc4966b8a3fbe1a1a1b365cbad11c6a) (25245405) | +0.002 GEN | [`0xf0f9b74a…`](https://explorer-bradbury.genlayer.com/tx/0xf0f9b74afce9da44f7efd9634bbcc13a55e9ba27149773697ff231e054cc5507) | DELIVERED |
+| 2 | spend → vendor | [`0x445affaf…`](https://explorer-bradbury.genlayer.com/tx/0x445affaf3a8c97eb685d7a90b5fa48d6613cdccff284515d2f360d822a4f9ee3) | [`0x36aa5d25…`](https://explorer-bradbury.genlayer.com/tx/0x36aa5d255e4cbe3d3816824791d1712c56d7c5dbb0f92ba495f0a1d9b10d2123) (25245655) | +0.001 GEN | [`0x895e7f20…`](https://explorer-bradbury.genlayer.com/tx/0x895e7f200f598717336a0cba401def5cf769053196ade3bcc254909ad7c0ea71) | DELIVERED |
+| 3 | refund → delegator | [`0xe367886a…`](https://explorer-bradbury.genlayer.com/tx/0xe367886a2fad25993ba29c73618e31642d3a920d4ee0ce487a5eafffb8e5c3dc) | [`0x218ad947…`](https://explorer-bradbury.genlayer.com/tx/0x218ad947043dc38dc306fe9f6bb638d37d7f2a1e290a0d6f0c9b8d7c859c0da4) (25245802) | +0.001 GEN | [`0x58291200…`](https://explorer-bradbury.genlayer.com/tx/0x582912000a4e8c1a80a365faa9ff9dbd4e4634fe92004bc200d79628129b90c8) | DELIVERED |
+| 4 | spend → rejecter | [`0x2bd93180…`](https://explorer-bradbury.genlayer.com/tx/0x2bd931809390512088a4ab1c1a5df57819c08d6997bc1320395b89372b6c9cb2) | [`0x41c9add0…`](https://explorer-bradbury.genlayer.com/tx/0x41c9add052ece7d0a931788776f42ad5c469530e0c788d67bf2c64774afb2b62) (25245847) | 0 GEN | [`0x4586349e…`](https://explorer-bradbury.genlayer.com/tx/0x4586349e89250ed372a71c38c978305b060ad6b1776cad2645215fd113343d07) | FAILED: 0.001 back to mandate #1's budget |
+
+Settling the same payout again is rejected each time ([`0x588fee72…`](https://explorer-bradbury.genlayer.com/tx/0x588fee724436052ca0b1f9a5c9a1419736c51d01b0c611aadb56e7d90ca924e3), [`0xf5430e8c…`](https://explorer-bradbury.genlayer.com/tx/0xf5430e8cfc84f79680ecff5bd19572065c04494db090c96ce7d5e93e03d653dd), [`0xa9c33e14…`](https://explorer-bradbury.genlayer.com/tx/0xa9c33e1492f465ffd890ebfd836ab232b0301a18d8734c8794f7e1d8236c66af), [`0xa08ca7c4…`](https://explorer-bradbury.genlayer.com/tx/0xa08ca7c40cb3d6d13bc110fc7a76509ed55197ab90ef474151f5ba37c4b7a2f5), [`0x189e366b…`](https://explorer-bradbury.genlayer.com/tx/0x189e366b0a86629541d0f4239f870d2381e12d423b9e814064465285f6c27ec6)). Afterwards `get_accounting` reports balance = expected = 0.001 GEN (mandate #1's restored budget), `unaccounted: 0`.
 
 ## What it does
 
@@ -69,7 +66,7 @@ After the run `get_accounting` reports `unaccounted: 0`: every payout and refund
 | Judgment | Validators fetch each receipt's evidence page and judge the spends against the objective and rubric | Yes, by consensus |
 | Decision ladder | `continue` → full authority · `warn` → recorded, **2 warnings in a row escalate to `constrain`** · `constrain` → cap halved and evidence mandatory · `revoke` → frozen, one agent appeal, then refund · `escalate` → frozen until the delegator restores (under constraint, recorded as an override) or closes | Deterministic on top of the AI decision |
 | Passive safety | `emergency_revoke` by the delegator at any time; `withdraw_remaining` after expiry | No |
-| Payout ledger | Every vendor payment and refund is a payout; a transfer that provably failed is reconciled back, so nothing is lost | No |
+| Payout ledger | Every vendor payment and refund is a payout, settled from its own transfer's on-chain result; a failed one is credited back, so nothing is lost | Consensus over chain data, no LLM |
 | Cross-chain effect | Every decision emits `MandateDecision(agent, mandate_id, decision, status, permission_ref)` for an off-chain revocation controller (e.g. ERC-7710) | — |
 
 ## Supervision is retrospective
@@ -123,26 +120,41 @@ Pages longer than 3,000 characters are cut, never silently: the prompt says
 `[TRUNCATED: first 3000 of N characters shown]` and instructs the model to
 `escalate` if the missing part could decide the outcome.
 
-## Payments, refunds and reconciliation
+## Payments, refunds and settlement
 
-Value transfers from a GenLayer contract are emitted messages that settle after
-the transaction finalizes; a recipient contract can still reject one. So the
-contract never assumes a payment arrived:
+A value transfer from a GenLayer contract executes when the paying transaction
+finalizes: the consensus contract calls this contract's ghost account on the
+EVM layer, and the ghost emits `TransactionExecuted(to, msgId, data)` only if
+the value call succeeded. So the contract never assumes a payment arrived, and
+it judges each payment by its own transfer, never by its aggregate balance:
 
 - `spend` and every refund (`emergency_revoke`, `withdraw_remaining`,
-  `resolve_escalation(id, false)`) first check the contract holds the amount,
-  then record a **payout** (`get_payouts`) and keep `expected_balance`, the
-  sum the contract should hold after all sent payouts.
-- If a transfer failed, the contract's real balance exceeds
-  `expected_balance` (`get_accounting().unaccounted`). After a 1-day settle
-  window the delegator or agent calls `reconcile_payout(payout_id)`. A failed
-  vendor payment returns to the mandate's budget (and `spent` is reduced); the
-  receipt stays, marked `FAILED`. A failed refund, or a payment that fails
-  after the mandate closed, is credited to the delegator's `recoverable`
-  balance, which `recover(id, to)` sends to any address the delegator picks.
-- A payout can only be reconciled once, and only against unaccounted funds,
-  so one bounce cannot be claimed twice and a delivered transfer cannot be
-  reversed.
+  `resolve_escalation(id, false)`, `recover`) first check the contract holds
+  the amount, then record a **payout** (`get_payouts`) with the paying
+  transaction's sender and creation time. One payout per sender per second,
+  so that pair identifies the paying transaction.
+- `settle_payout(payout_id, tx_hash, finalize_tx)`, callable by anyone, has
+  validators read the chain and agree on the result:
+  1. `gen_getTransactionReceipt(tx_hash)` must be this contract's, from the
+     payout's sender at the payout's creation time, executed successfully and
+     finalized, and its calldata must be the call that created this payout
+     (method, mandate, and for `spend` the recipient and amount).
+  2. `eth_getTransactionReceipt(finalize_tx)` must be the consensus
+     transaction that emitted `TransactionFinalized(tx_hash)`.
+  3. **DELIVERED** if that transaction holds this contract's
+     `TransactionExecuted` to the payout's recipient, with a message id the
+     messages contract links to `tx_hash`; otherwise **FAILED**.
+- A FAILED vendor payment returns to the mandate's budget (and `spent` is
+  reduced); the receipt stays, marked `FAILED`. A failed refund, or a payment
+  that fails after the mandate closed, is credited to the delegator's
+  `recoverable` balance, which `recover(id, to)` sends to any address.
+- A payout settles once, and a paying transaction settles at most one payout.
+- `get_accounting` (balance vs. expected) is an informational cross-check only.
+
+The RPC URL and consensus contract addresses are Testnet Bradbury's
+(constants at the top of the contract). A payee that is itself a GenLayer
+contract is settled as delivered (its transfer becomes a separate
+transaction); MandateGuard pays vendor and delegator accounts.
 
 ## Escalation override
 
@@ -170,7 +182,7 @@ label — amounts, recipients and refunds are enforced by contract state.
 | `resolve_escalation(id, restore)` | delegator | restore under constraint (recorded override) or close and refund |
 | `emergency_revoke(id)` | delegator | immediate close + refund |
 | `withdraw_remaining(id)` | delegator | after expiry, or after a revoke once the appeal is used/expired |
-| `reconcile_payout(payout_id)` | delegator or agent | after the settle window, if the contract still holds the funds |
+| `settle_payout(payout_id, tx_hash, finalize_tx)` | anyone | after the paying transaction finalizes; validators read its transfer result: DELIVERED, or FAILED and credited back |
 | `recover(id, to)` | delegator | send the recoverable balance (failed refunds) to any address |
 | `get_mandate`, `get_receipts`, `get_payouts`, `get_reviews`, `get_accounting`, `get_agent_record`, `get_mandate_count` | view | |
 
@@ -183,7 +195,7 @@ the latest review to the Internet Court `AgentReviewDecision` payload.
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 genvm-lint check contracts/mandate_guard.py
-pytest tests/direct -v                         # 53 tests
+pytest tests/direct -v                         # 64 tests
 # integration, on Bradbury, against the packed code (keys in GL_PK0..2 env vars)
 python deploy/shrink.py contracts/mandate_guard.py build/mandate_guard.py --pack
 cd tests/integration && gltest . -v -s --network testnet_bradbury
@@ -191,20 +203,22 @@ cd tests/integration && gltest . -v -s --network testnet_bradbury
 
 ### Deploying to Testnet Bradbury
 
-The source is 36.2 KB; Bradbury rejects deploys above ~20 KB of code. Deploy
-the output of `deploy/shrink.py` (AST-checked; 9.0 KB packed). CI re-runs all
-53 direct tests against the packed code.
+The source is 43.4 KB; Bradbury rejects deploys above ~20 KB of code. Deploy
+the output of `deploy/shrink.py` (AST-checked; 11.2 KB packed). CI re-runs all
+64 direct tests against the packed code.
 
 ```bash
 python deploy/shrink.py contracts/mandate_guard.py build/mandate_guard.py --pack
 genlayer network && genlayer deploy --contract build/mandate_guard.py
 ```
 
-## Tests (53 direct)
+## Tests (64 direct, 6-step Bradbury E2E)
 
 - **Mandate lifecycle** — grant validation; spend receipts, transfers and events; hard limits independent of the LLM; review gating and keeper-triggered reviews; warn→warn escalation to constrain; constrained half-cap + mandatory evidence and recovery; revoke → appeal window → refund; successful appeal restores authority and reputation; failed appeal is final and not double counted; escalation restored or closed by the delegator; emergency revoke; expiry; top-up; decision events carry `permission_ref` with correctly bound indexed fields.
 - **Consensus (validator replay)** — agrees with honest variation; rejects any different decision (including continue vs warn), criteria disagreement, a whitewashing leader, a griefing revoke, malformed/oversized payloads, fake transient errors and LLM errors; unknown labels revert; agent text and evidence are fenced; dead links don't block reviews.
-- **Adversarial** (`test_safety.py`) — a delivered payment cannot be reconciled; a failed one returns to the budget once, after the settle window, by a party only; one bounce cannot be claimed twice; spends revert when the contract cannot pay; failed refunds after emergency revoke, expiry withdraw and escalation close become recoverable and can be recovered once; double close is rejected; unauthorized and self-dealing spends; recipient allowlist; evidence commitment match, edited evidence binding validators, changed/unavailable statuses, explicit truncation; repeated escalation overrides never count as clearance; conflicting leader decisions are rejected.
+- **Adversarial** (`test_safety.py`) — a delivered payment settles DELIVERED and validators reject a leader claiming failed; a failed one returns to the budget; a paying transaction settles only its own payout, once; settle rejects another sender, time, contract, method, amount or recipient, a reverted or unfinalized transaction, a finalization of another transaction, bad hashes and an unavailable RPC; one payment per sender per second; real recorded Bradbury receipts settle DELIVERED, and FAILED without the ghost's `TransactionExecuted`; spends revert when the contract cannot pay; failed refunds after emergency revoke, expiry withdraw and escalation close become recoverable and can be recovered once; double close is rejected; unauthorized and self-dealing spends; recipient allowlist; evidence commitment match, edited evidence binding validators, changed/unavailable statuses, explicit truncation; repeated escalation overrides never count as clearance; conflicting leader decisions are rejected.
+
+- **Bradbury E2E** (`tests/integration`) — one mandate through warn → constrain (half cap and mandatory evidence enforced) → revoke → appeal upheld → refund; every spend and the refund settled DELIVERED after the recipient's balance is checked to rise by exactly the payout in the finalizing block; a spend to an EVM contract that rejects value settles FAILED, the recipient's balance does not move and the amount returns to the budget.
 
 ## License
 

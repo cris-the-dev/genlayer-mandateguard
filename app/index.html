@@ -5,7 +5,7 @@
 </head><body>
 <div class="bar"><div class="w"><span class="who">cristhedev <span style="color:var(--line)">/</span> genlayer builds</span><nav id="sites"></nav></div></div>
 <div class="head"><div class="w"><div><h1>MandateGuard</h1><p>Consensus supervision for an AI agent's spending mandate: receipts, reviews and a continue, warn, constrain, revoke or escalate decision.</p></div><button id="connect" class="ghost" type="button">Connect wallet</button></div></div>
-<div class="meta"><div class="w"><span>contract <a href="https://explorer-bradbury.genlayer.com/address/0x637301a7Bc5F8b0b0E8bd6AC858894Ac94761BD3">0x6373…1BD3 ↗</a></span><span>network <b>testnet bradbury</b></span><span><a href="https://github.com/cris-the-dev/genlayer-mandateguard">source ↗</a></span><span><a href="docs.html">docs →</a></span></div></div>
+<div class="meta"><div class="w"><span>contract <a href="https://explorer-bradbury.genlayer.com/address/0xa66bfADc1F2A49de8465577dd55ba5E1ED7d9256">0xa66b…9256 ↗</a></span><span>network <b>testnet bradbury</b></span><span><a href="https://github.com/cris-the-dev/genlayer-mandateguard">source ↗</a></span><span><a href="docs.html">docs →</a></span></div></div>
 <main class="w">
   <p id="status" class="status" hidden></p>
   <div class="grid">
@@ -66,7 +66,7 @@
 
 <script type="module">
 import { contract, wireWallet, send, status, gen, toWei, esc, short, $, EXPLORER } from "./gl.js";
-const guard = contract("0x637301a7Bc5F8b0b0E8bd6AC858894Ac94761BD3");
+const guard = contract("0xa66bfADc1F2A49de8465577dd55ba5E1ED7d9256");
 let me = null, items = [];
 const LIVE = ["ACTIVE", "WARNED", "CONSTRAINED"];
 const tagFor = (s) => ({ ACTIVE: "ok", WARNED: "on", CONSTRAINED: "on", REVOKED: "bad", ESCALATED: "bad" })[s] ?? "";
@@ -124,10 +124,9 @@ function actions(m) {
 async function show(id) {
   const m = items.find((x) => x.id === id);
   if (!m) return;
-  const [receipts, reviews, payouts, acct] = await Promise.all(["get_receipts", "get_reviews", "get_payouts"].map((f) => guard.read(f, [id])).concat(guard.read("get_accounting")));
-  const party = me && [m.delegator, m.agent].some((a) => a.toLowerCase() === me.toLowerCase()), now = Date.now() / 1000;
-  const fix = (p) => party && p.status === "SENT" && now > p.reconcilable_after && acct.unaccounted >= p.amount ? ` <button class="ghost" data-act="reconcile_payout" data-arg="${p.id}">Mark failed</button>` : "";
-  const xfer = (p) => `<span class="tag ${p.status === "FAILED" ? "bad" : ""}">${p.status === "FAILED" ? "failed, restored" : "sent"}</span>${fix(p)}`;
+  const [receipts, reviews, payouts] = await Promise.all(["get_receipts", "get_reviews", "get_payouts"].map((f) => guard.read(f, [id])));
+  const fix = (p) => me && p.status === "SENT" ? ` <button class="ghost" data-act="settle_payout" data-arg="${p.id}" title="Settle from this transfer's result once the paying transaction is finalized">Settle</button>` : "";
+  const xfer = (p) => `<span class="tag ${p.status === "FAILED" ? "bad" : ""}">${{ FAILED: "failed, restored", DELIVERED: "delivered" }[p.status] || "sent"}</span>${fix(p)}`;
   const ev = (r) => r.evidence?.length ? r.evidence.map((e) => e.status).join(", ") : "–";
   const el = $("#detail");
   el.hidden = false;
@@ -165,7 +164,13 @@ async function show(id) {
 $("#mandates").addEventListener("click", (e) => { const tr = e.target.closest("tr[data-id]"); if (tr) { e.preventDefault(); history.replaceState(null, "", `#mandate-${tr.dataset.id}`); show(Number(tr.dataset.id)); $("#detail").scrollIntoView({ behavior: "smooth" }); } });
 $("#detail").addEventListener("click", async (e) => {
   const fn = e.target.dataset?.act; if (!fn) return;
-  const id = Number($("#detail").dataset.id), args = fn === "resolve_escalation" ? [id, e.target.dataset.arg === "1"] : fn === "reconcile_payout" ? [Number(e.target.dataset.arg)] : [id];
+  const id = Number($("#detail").dataset.id);
+  let args = fn === "resolve_escalation" ? [id, e.target.dataset.arg === "1"] : [id];
+  if (fn === "settle_payout") {
+    const tx = prompt("GenLayer transaction that made this payment (0x…)"), fin = tx && prompt("Consensus-layer transaction that finalized it (0x…)");
+    if (!fin) return;
+    args = [Number(e.target.dataset.arg), tx.trim(), fin.trim()];
+  }
   if (fn === "emergency_revoke" && !confirm("Close this mandate now and refund the remaining budget to you?")) return;
   if (await send(guard, fn.replaceAll("_", " "), fn, args)) load(id);
 });
